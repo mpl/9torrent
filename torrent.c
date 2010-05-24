@@ -639,11 +639,42 @@ updatepeerspieces(Torrent *tor, Peer *peer, int index, char op)
 	return 0;
 }
 
+//TODO: if it turns out the peer_id is too unreliable, maybe we should use an internal id to tag the peers
 void 
-freepeer(Peer *peer)
+freepeer(Peer *peer, Peer ***peerslist)
 {
 	Piece *lister, *rimmer;
+	Peer *current, *previous;
 
+	// not sure yet if can rely on peerid at all times, so let's asplode for the time being 
+	if (strcmp(peer->peerinfo->address, "127.0.0.1") != 0
+	&& peer->peerinfo->id == nil){
+		print("freepeer: no peerid");
+		error("freepeer: no peerid");
+	}
+
+	// find the peer in the list and detach it from there
+	current = **peerslist;
+	previous = current;
+	while (current != nil){
+		if (strcmp(current->peerinfo->address, "127.0.0.1") != 0
+		&& current->peerinfo->id == nil){
+			print("freepeer: no peerid");
+			error("freepeer: no peerid");
+		}
+		if (strcmp(current->peerinfo->id, peer->peerinfo->id) == 0){
+			if (previous == current)
+				*peerslist = &(current->next);
+			else
+				previous->next = current->next;
+			current->next = nil;
+			break;
+		}
+		previous = current;
+		current = current->next;
+	}
+
+	// now actually free some stuff		
 	free(peer->peerinfo->address);
 	free(peer->peerinfo->id);
 	free(peer->peerinfo);

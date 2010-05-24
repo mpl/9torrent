@@ -6,18 +6,19 @@
 #include <thread.h> 
 #include <9p.h>
 #include <pool.h>
+#include "ip.h"
 #include "torrent.h"
 #include "torrentfile.h"
 #include "misc.h"
 #include "comm.h"
 
-Torrent *torrents[10];
+Torrent *torrents[1];
 char mypeerid[PEERIDLEN+1];
 char *port;
 char *datadir;
 int verbose = 0;
-int nocalling = 0;
-int nolisten = 0;
+int onlycall = 0;
+int onlylisten = 0;
 int maxpeers = 30;
 QLock l;
 
@@ -103,7 +104,8 @@ callee(void *arg)
 	qunlock(&l);
 	print("callee [%d] starting\n", threadid());
 	chatpeer(params->tor, params->peer, params->c, 2);
-	freepeer(params->peer);
+	params->tor->p_callersnb--;
+//	freepeer(params->peer, &(params->tor->p_callees));
 //	chanfree(params->c);
 //	free(params);
 	print("callee [%d] terminated\n", threadid());
@@ -115,12 +117,12 @@ callees(void *arg)
 {
 	Torrent *tor;
 	Alt *a = 0;
-	int chanm[1];
+	// 4 bytes for the accept fd, and 16 for the ip address 
+	uchar chanm[20];
 	int counter = 1;
 	int n;
 	struct Params{Torrent *tor; Peer *peer; Channel *c;} *params;
-	int dfd;
-	int *toto;
+	int pfd;
 
 	tor = arg;
 	// first start the listener 
@@ -133,7 +135,7 @@ callees(void *arg)
 	a[1].op = CHANEND;
 	proccreate(listener, a[0].c, STACK);
 
-	/* Then start a new seeder everytime the listener tells us to. */
+	// Then start a new callee thread everytime the listener receives a call
 	for(;;){
 		n = alt(a);
 		if((n<0) || (n>counter)){
@@ -143,28 +145,57 @@ callees(void *arg)
 		if ( n == 0){
 		// message from teh listener 
 			dbgprint(1, "msg from the listener");
-			dfd = chanm[0];
-			// add a new Alt entry 
-			counter++;
-			a = erealloc(a, (counter+1)*sizeof(Alt));
-			a[counter].v = nil;
-			a[counter].c = nil;
-			a[counter].op = CHANEND;
-			a[counter-1].v = chanm;
-			a[counter-1].c = chancreate(sizeof(chanm), 0);
-			a[counter-1].op = CHANRCV;
-			params = emalloc(sizeof(struct Params));
-//TODO: we should a have peers list akin to the one for the callers 
-			params->peer = emalloc(sizeof(Peer));
-			params->peer->fd = dfd;
-			params->tor = tor;
-			params->c = a[counter-1].c;
-			threadcreate(callee, params, STACK);
-			dbgprint(1, "callee thread #%d created\n", counter-1);
+//			pfd = chanm[0];
+			memmove(&pfd, chanm, sizeof(int));
+			// allow only for a total of maxpeers peers
+			if (tor->p_callersnb + tor->p_calleesnb < maxpeers){
+				// add a new Alt entry 
+				counter++;
+				a = erealloc(a, (counter+1)*sizeof(Alt));
+				a[counter].v = nil;
+				a[counter].c = nil;
+				a[counter].op = CHANEND;
+				a[counter-1].v = chanm;
+				a[counter-1].c = chancreate(sizeof(chanm), 0);
+				a[counter-1].op = CHANRCV;
+	
+				// add a new caller peer to the list
+				tor->p_callers = erealloc(tor->p_callers, (tor->p_callersnb + 1) * sizeof(Peer *));
+				tor->p_callers[tor->p_callersnb] = emalloc(sizeof(Peer));
+				if (tor->p_callersnb > 0)
+					tor->p_callers[tor->p_callersnb - 1]->next = tor->p_callers[tor->p_callersnb];
+				tor->p_callersnb++;
+				
+				// prepare params for the thread
+				params = emalloc(sizeof(struct Params));
+				params->peer = tor->p_callers[tor->p_callersnb - 1];
+				params->peer->fd = pfd;
+				params->tor = tor;
+				params->c = a[counter-1].c;
+				params->peer->peerinfo = emalloc(sizeof(Peerinfo));
+				params->peer->peerinfo->address = smprint("%V", &chanm[4]);
+				params->peer->peerinfo->id = nil;
+				params->peer->busy = 1;
+				threadcreate(callee, params, STACK);
+				dbgprint(1, "callee thread #%d created\n", counter-1);
+			}
+			else 
+				close(pfd);
 		}
 //		else
 //			dbgprint(1, "callee #%d taking over\n",n);
 	}
+}
+
+void 
+initstuff(Torrent *tor)
+{
+	tor->peersinfonb = 0;
+	tor->peersinfo = nil;
+	tor->p_callersnb = 0;
+
+	fmtinstall('V', eipfmt);
+	fmtinstall('I', eipfmt);
 }
 
 Torrent *
@@ -176,6 +207,7 @@ addtorrent(char *torrentfile)
 	print("Adding %s\n", torrentfile);
 	tor = emalloc(sizeof(Torrent));
 	parsebtfile(torrentfile, tor);
+	initstuff(tor);
 	tor->infohash = getinfohash(torrentfile, tor->infosize);
 	for (int i = 0; i<20; i++)
 		print("%%%.2ux", tor->infohash[i]);
@@ -205,14 +237,14 @@ caller(void *arg)
 {
 	struct Params{ Torrent *tor; Peer *peer; Channel *c;} *params;
 	Piece *lister, *rimmer;
-	int m[1];
+	uchar chanmsg[1];
 
 	params = arg;
 	print("caller [%d] starting\n", threadid());
 	chatpeer(params->tor, params->peer, params->c, 1);
-	m[0] = 7;
-	send(params->c, m);
-	freepeer(params->peer);
+	chanmsg[0] = 7;
+	send(params->c, chanmsg);
+//	freepeer(params->peer, &(params->tor->p_callees));
 //TODO: freeing the chan makes next call to alt() fail. why? Not really a pb in itself tho, as I can/will reuse those channels. But it might be a hint at something amiss.
 //	chanfree(params->c);
 //	free(params);
@@ -225,34 +257,39 @@ void
 callers(void *arg)
 {
 	Torrent *tor = arg;
-	int m[1];
+	uchar m[1];
 	int i;
 	int n;
 	Alt *a = 0;
 	struct Params{Torrent *tor; Peer *peer; Channel *c;} *params;
 
-//TODO: not peersinfonb but rather maxpeers
 	for (i = 0; i<tor->peersinfonb; i++){
-		tor->peers = erealloc(tor->peers, (i+1) * sizeof(Peer *));
-		tor->peers[i] = emalloc(sizeof(Peer));
-		tor->peers[i]->peerinfo = emalloc(sizeof(Peerinfo));
-		tor->peers[i]->peerinfo->address = smprint("%s", tor->peersinfo[i]->address);
-		tor->peers[i]->peerinfo->port = tor->peersinfo[i]->port;
-		if (tor->peersinfo[i]->id != nil)
-			tor->peers[i]->peerinfo->id = smprint("%s", tor->peersinfo[i]->id);
+		// allow only for a total of maxpeers peers
+		if (tor->p_callersnb + tor->p_calleesnb < maxpeers){
+			tor->p_callees = erealloc(tor->p_callees, (i+1) * sizeof(Peer *));
+			tor->p_callees[i] = emalloc(sizeof(Peer));
+			tor->p_callees[i]->busy = 1;
+			tor->p_callees[i]->peerinfo = emalloc(sizeof(Peerinfo));
+			tor->p_callees[i]->peerinfo->address = smprint("%s", tor->peersinfo[i]->address);
+			tor->p_callees[i]->peerinfo->port = tor->peersinfo[i]->port;
+			if (tor->peersinfo[i]->id != nil)
+				tor->p_callees[i]->peerinfo->id = smprint("%s", tor->peersinfo[i]->id);
+			else
+				tor->p_callees[i]->peerinfo->id = nil;
+			tor->p_calleesnb++;
+			a = erealloc(a, (i+1)*sizeof(Alt));
+			a[i].v = m;
+			a[i].c = chancreate(sizeof(m), 0);
+			a[i].op = CHANRCV;
+			params = emalloc(sizeof(struct Params));
+			params->tor = tor;
+			params->peer = tor->p_callees[i];
+			params->c = a[i].c;
+			threadcreate(caller, params, STACK);
+			dbgprint(1, "caller thread #%d started\n", i);
+		}
 		else
-			tor->peers[i]->peerinfo->id = nil;
-		a = erealloc(a, (i+1)*sizeof(Alt));
-		a[i].v = m;
-		a[i].c = chancreate(sizeof(m), 0);
-		a[i].op = CHANRCV;
-		params = emalloc(sizeof(struct Params));
-		params->tor = tor;
-		params->peer = tor->peers[i];
-		params->c = a[i].c;
-		tor->peers[i]->busy = 1;
-		threadcreate(caller, params, STACK);
-		dbgprint(1, "caller thread #%d started\n", i);
+			break;
 	}
 	a = erealloc(a, (i+1)*sizeof(Alt));
 	a[i].v = nil;
@@ -275,6 +312,30 @@ callers(void *arg)
 }
 
 static void
+poketracker(void *arg)
+{
+	struct Params{ Torrent *tor; char *reqtype; Channel *c;} *params;
+	int interval;
+	int firstcall = 1;
+	uchar chanmsg[1] = {1};
+
+	params = arg;
+	for (;;){
+		calltracker(params->tor, params->reqtype);
+// we attempt to call again when 95% of the interval time has passed,
+// to allow for various delays
+		interval = params->tor->interval * 95 / 100;
+		if (firstcall){
+			send(params->c, chanmsg);
+			chanfree(params->c);
+			firstcall = 0;
+		}
+		sleep(interval * 1000);
+	}
+}
+
+
+static void
 usage(void)
 {
 	fprint(2, "usage: btfs [-d datadir] [-m mntpt] ");
@@ -291,26 +352,32 @@ threadmain(int argc, char **argv)
 	port = smprint("%s", "6889");
 	Dir *dir;
 	int fd;
+	uchar chanmsg[1];
+	Channel *c;
+	struct Params{ Torrent *tor; char *reqtype; Channel *c;} *params;
 
 //TODO: add maxpeers, keep nocalling and nolisten (usefull for debugging) but maybe with other flags
 	ARGBEGIN{
-	case 'm':
-		mtpt = ARGF();
+	case 'c':
+		onlycall = 1;
 		break;
 	case 'd':
 		datadir = ARGF();
 		break;
+	case 'l':
+		onlylisten = 1;
+		break;
+	case 'm':
+		mtpt = ARGF();
+		break;
+	case 'P':
+		maxpeers = atoi(ARGF());
 	case 'p':
 		port = ARGF();
 		break;
+//TODO: make another level of verbose for just the few prints we have now when not verbose
 	case 'v':
 		verbose = 1;
-		break;
-	case 'c':
-		nocalling = 1;
-		break;
-	case 'l':
-		nolisten = 1;
 		break;
 	default:
 		break;
@@ -335,13 +402,21 @@ threadmain(int argc, char **argv)
 	filltree(fs.tree->root);
 	threadpostmountsrv(&fs, nil, mtpt, MREPL|MCREATE);
 	setpeerid();
-	torrents[0] = addtorrent("/usr/glenda/clips-local.torrent");
-//	torrents[0] = addtorrent("/usr/glenda/district9.torrent");
-	if (!nolisten)
+	torrents[0] = addtorrent("/usr/glenda/local.torrent");
+	// start the listeners
+	if (!onlycall)
 		proccreate(callees, torrents[0], STACK);
-//TODO make a proc in charge of just calling the tracker(s)
-	calltracker(torrents[0], "announce");
-	if (!nocalling)
+	// prepare the tracker caller
+	c = chancreate(sizeof(chanmsg), 0);
+	params->reqtype = smprint("announce");
+	params->c = c;
+	params->tor = torrents[0];
+//TODO: maybe use a simple coroutine along with the callers instead of a standalone proc?
+	proccreate(poketracker, params, STACK);
+	// wait for the first call to the tracker to finish
+	recv(c, chanmsg);
+	// start the callers
+	if (!onlylisten)
 		proccreate(callers, torrents[0], STACK);
 	threadexits(0);
 }

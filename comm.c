@@ -3,6 +3,7 @@
 #include <bio.h>
 #include <pool.h>
 #include <thread.h>
+#include <ip.h>
 #include "misc.h"
 #include "torrent.h"
 #include "comm.h"
@@ -90,6 +91,7 @@ getelement(int keytype, char *data, int *offset, Torrent *tor)
 	int length;
 	int newkeytype;
 	static int index = 0;
+	uchar buf[4];
 
 	switch(keytype){
 	case BTinterval:
@@ -99,8 +101,9 @@ getelement(int keytype, char *data, int *offset, Torrent *tor)
 		}
 		(*offset)++;
 		tor->interval = readnumber(data, offset, 'e');
-		dbgprint(1, "interval: %d\n", length);
+		dbgprint(1, "interval: %d\n", tor->interval);
 		break;
+//TODO: add BTpeers6 ?
 	case BTpeers:
 		if (data[*offset] != 'l'){
 			// assume it's binary model data and not an error 
@@ -111,15 +114,18 @@ getelement(int keytype, char *data, int *offset, Torrent *tor)
 			length = length / 6;
 			for (index=0; index<length; index++){
 				tor->peersinfo = erealloc(tor->peersinfo, (index+1) * sizeof(Peerinfo *));
-				(tor->peersinfo)[index] = emalloc(sizeof(Peerinfo));
-				(tor->peersinfo)[index]->address = ipcharstostring(&data[*offset]);
+				tor->peersinfo[index] = emalloc(sizeof(Peerinfo));
+//				tor->peersinfo[index]->address = ipcharstostring(&data[*offset]);
+				for (int i=0; i<4; i++)
+					buf[i] = (uchar)data[*offset + i];
+				tor->peersinfo[index]->address = smprint("%V", buf);
 				(*offset)+=4;
-				(tor->peersinfo)[index]->port = (uchar)data[*offset] * 256;
+				tor->peersinfo[index]->port = (uchar)data[*offset] * 256;
 				(*offset)++;
-				(tor->peersinfo)[index]->port += (uchar)data[*offset];
+				tor->peersinfo[index]->port += (uchar)data[*offset];
 				(*offset)++;
-				(tor->peersinfo)[index]->id = nil;
-				dbgprint(1, "peers[%d]: %s:%d\n", index, (tor->peersinfo)[index]->address, (tor->peersinfo)[index]->port);
+				tor->peersinfo[index]->id = nil;
+				dbgprint(1, "peers[%d]: %s:%d\n", index, tor->peersinfo[index]->address, tor->peersinfo[index]->port);
 			}
 		}
 		else{
@@ -135,7 +141,7 @@ getelement(int keytype, char *data, int *offset, Torrent *tor)
 				(*offset)++;
 				// ip, peer_id, port 
 				tor->peersinfo = erealloc(tor->peersinfo, (index+1) * sizeof(Peerinfo *));
-				(tor->peersinfo)[index] = emalloc(sizeof(Peerinfo));
+				tor->peersinfo[index] = emalloc(sizeof(Peerinfo));
 				for (int i=0; i<3; i++){
 					if ((newkeytype = getkey(data, offset)) == -1)
 						return -1;
@@ -155,19 +161,19 @@ getelement(int keytype, char *data, int *offset, Torrent *tor)
 	case BTpeeraddress:
 		if ((length = readnumber(data, offset, ':')) == -1) 
 			return -1;
-		(tor->peersinfo)[index]->address = emalloc((length+1)*sizeof(char));
-		memmove((tor->peersinfo)[index]->address, &data[*offset], length);
-		((tor->peersinfo)[index]->address)[length]='\0';
-		dbgprint(1, "peer address: %s\n", (tor->peersinfo)[index]->address);
+		tor->peersinfo[index]->address = emalloc((length+1)*sizeof(char));
+		memmove(tor->peersinfo[index]->address, &data[*offset], length);
+		tor->peersinfo[index]->address[length]='\0';
+		dbgprint(1, "peer address: %s\n", tor->peersinfo[index]->address);
 		*offset = *offset + length;
 		break;
 	case BTpeerid:
 		if ((length = readnumber(data, offset, ':')) == -1) 
 			return -1;
-		(tor->peersinfo)[index]->id = emalloc((length+1)*sizeof(char));
-		memmove((tor->peersinfo)[index]->id,&data[*offset],length);
-		((tor->peersinfo)[index]->id)[length]='\0';
-		dbgprint(1, "peer id: %s\n", (tor->peersinfo)[index]->id);
+		tor->peersinfo[index]->id = emalloc((length+1)*sizeof(char));
+		memmove(tor->peersinfo[index]->id,&data[*offset],length);
+		tor->peersinfo[index]->id[length]='\0';
+		dbgprint(1, "peer id: %s\n", tor->peersinfo[index]->id);
 		*offset = *offset + length;
 		break;
 	case BTpeerport:
@@ -175,8 +181,8 @@ getelement(int keytype, char *data, int *offset, Torrent *tor)
 			return -1;
 		(*offset)++;
 		length = readnumber(data, offset, 'e');
-		(tor->peersinfo)[index]->port = length;
-		dbgprint(1, "peer port: %d\n", (tor->peersinfo)[index]->port);
+		tor->peersinfo[index]->port = length;
+		dbgprint(1, "peer port: %d\n", tor->peersinfo[index]->port);
 		break;
 	case BTcomplete:
 		if (data[*offset] != 'i')
@@ -229,6 +235,12 @@ parsetrackerreply(char *reply, Torrent *tor)
 	int *offset; 
 	int n;
 
+	// cleanup the peersinfo from the previous call
+	for (int i = 0; i<tor->peersinfonb; i++){
+		free((tor->peersinfo)[i]->address);
+		free((tor->peersinfo)[i]->id);
+		free((tor->peersinfo)[i]);
+	}
 	tor->peersinfonb = 0;
 	if (reply[0] != 'd'){
 		dbgprint(1, "Not a valid tracker reply");
@@ -271,12 +283,12 @@ calltracker(Torrent *tor, char *reqtype)
 	int notracker = 0;
 	int i = 0;
 
-//TODO: something smarter for the timeouts, probably with another proc to monitor the whole thing
-//TODO: when updating the peer's list, fill the gaps (if any), and then append, until we reach maxpeers. 
+//TODO: we'll have to call again all the trackers inbefore their interval, so we'll have to set the timeout according to how many we have to call.
+//TODO: now we're just overwriting the peersinfos at everycall; we should do better.
 	if(!notracker){
 		for(;;){
-			//TODO: free tor->announce the first time
-			if (tor->announcelist != nil && tor->announcelist[i] != nil)
+//			if (tor->announcelist != nil && tor->announcelist[i] != nil)
+			if (tor->annlistsize > 0)
 				tor->announce = tor->announcelist[i];
 			msg = forgerequest(tor, reqtype);
 			// webfs dance 
@@ -364,9 +376,6 @@ readlenpref(int peerfd)
 		return -1;
 	}
 	length = buf[0] * (int)pow(2,24) + buf[1] * (int)pow(2,16) + buf[2] * (int)pow(2,8) + buf[3];
-	/* hah that won't work because buf[] are chars 
-	length = buf[0]<<24 + buf[1]<<16 + buf[2]<<8 + buf[3];
-	*/
 	return length;
 }
 
@@ -486,7 +495,8 @@ readmsg(int peerfd, char *data)
 		dbgprint(1, "Unknown id, could be the end of the handshake.\n");
 		/* we put in data the 20 bytes which could be the peer id of the handshake */
 		data = realloc(data, PEERIDLEN);
-		bigE(len, (uchar *)data);
+//		bigE(len, (uchar *)data);
+		hnputl((uchar *)data, len);
 		pos = 4;
 		memmove(&data[pos], &id, sizeof(char));
 		pos++;
@@ -597,7 +607,8 @@ writemsg(int peerfd, int id, char *data, Torrent *tor)
 		length = tor->bitfieldsize;
 		size = 5 + length;
 		msg = emalloc(size);
-		bigE(length+1, msg);
+//		bigE(length+1, msg);
+		hnputl(msg, length+1);
 		msg[4] = 5;
 		pos = 5;
 		memmove(&msg[pos], data, length);
@@ -653,7 +664,8 @@ writemsg(int peerfd, int id, char *data, Torrent *tor)
 		size = 13 + length;
 		msg = emalloc(size);
 		size -= 4;
-		bigE(size, msg);
+//		bigE(size, msg);
+		hnputl(msg, size);
 		msg[4]=7;
 		size += 4;
 		length = hton(&length);
@@ -706,7 +718,7 @@ static void
 connect(void *arg)
 {
 	struct Params{ int *fd; char *address; int port; Channel *c;} *params;
-	int chanmsg[1];
+	uchar chanmsg[1];
 	char *addr;
 	char *port;
 
@@ -728,7 +740,7 @@ hello1(Peer *peer, Torrent *tor, Channel *c)
 	int peerfd;
 	int pos, m, n, bitfieldsize;
 	Channel *cio;
-	int chanmsg[1];
+	uchar chanmsg[1];
 	struct Params{ int *fd; char *address; int port; Channel *c;} *params;
 	uchar handshake[HANDSHAKE+1];
 
@@ -753,7 +765,7 @@ hello1(Peer *peer, Torrent *tor, Channel *c)
 		return -1;
 	}
 	chanmsg[0] = 1;
-	send(c,chanmsg);
+	send(c, chanmsg);
 
 	/*
 	<pstrlen><pstr><reserved><info_hash><peer_id>
@@ -815,7 +827,7 @@ hello1(Peer *peer, Torrent *tor, Channel *c)
 		return -1;
 	}
 
-	/* read, might be a bitfield */
+	// read, might be a bitfield 
 	peer->bitfield = emalloc(bitfieldsize);
 	if ((m = readmsg(peerfd, peer->bitfield)) != BTbitfield){
 		dbgprint(1, "No bitfield sent \n");
@@ -910,9 +922,13 @@ chatpeer(Torrent *tor, Peer *peer, Channel *c, char mode)
 	int chanm[1];
 	int n;
 
+	peer->am_interested = 1;
+	peer->am_choking = 1;
+	peer->peer_choking = 1;
+	peer->peer_interested = 0;
+
 	switch(mode){
 	case 1:
-//TODO: do we really want to call anyone if we have all the pieces? Probably yes, to seed.
 		// we are the caller 
 		if ((peer->fd = hello1(peer, tor, c)) < 0){
 			dbgprint(1, "Problem during hello1\n");
@@ -921,16 +937,7 @@ chatpeer(Torrent *tor, Peer *peer, Channel *c, char mode)
 		}
 		break;
 	case 2:
-//TODO: better peer managment for the callees ?
 		// we are being called 
-		peer->peerinfo = emalloc(sizeof(Peerinfo));
-		peer->peerinfo->address = nil;
-		peer->peerinfo->id = nil;
-		peer->am_interested = 1;
-		peer->am_choking = 1;
-		peer->peer_choking = 1;
-		peer->peer_interested = 0;
-		peer->busy = 1;
 		if (hello2(peer, tor, c) < 0){
 			dbgprint(1, "Problem during hello2\n");
 //TODO: cleanup
@@ -949,21 +956,6 @@ chatpeer(Torrent *tor, Peer *peer, Channel *c, char mode)
 		dbgprint(1, "Peer has no interesting piece \n", n);
 		peer->am_interested = 0;
 	}
-//	if (mode == 1) {
-//				if (peer->am_interested){
-//					// Send "interested" 
-//					if (writemsg(peer->fd, BTinterested, nil, nil) != BTinterested){
-//						dbgprint(1, "remote side hung up \n");
-//						return;
-//					}
-//				}
-//				else{
-//					if (writemsg(peer->fd, BTnotinterested, nil, nil) != BTnotinterested){
-//						dbgprint(1, "remote side hung up \n");
-//						return;
-//					}
-//				}
-//	}
 	sharepieces(peer, tor, c);
 	peer->busy = 0;
 	close(peer->fd);
@@ -979,8 +971,9 @@ listener(void *arg)
 	int acfd, lcfd, dfd;
 	char adir[40], ldir[40];
 	Channel *c;
-	int chanm[1];
+	uchar chanm[20];
 	char *address;
+	NetConnInfo *info;
 
 	c = arg;
 	address = smprint("%s", strcat("tcp!*!", port));
@@ -989,7 +982,7 @@ listener(void *arg)
 		error("");
 
 	for(;;){
-		/* listen for a call */
+		// listen for a call 
 		dbgprint(1, "waiting for a call\n");
 		lcfd = listen(adir, ldir);
 		if(lcfd < 0){
@@ -997,17 +990,27 @@ listener(void *arg)
 			error("");
 		}
 		dbgprint(1, "call received\n");
-		/* accept the call and open the data file */
+		// accept the call and open the data file 
 		dfd = accept(lcfd, ldir);
 		if(dfd < 0){
 			dbgprint(1, "pb with dfd\n");
 			error("");
 		}
-		chanm[0] = dfd;
+//		chanm[0] = dfd;
+		info = getnetconninfo(ldir, dfd);
+		if (info == nil){
+			dbgprint(1, "could not get conninfo\n");
+			error("");
+		}			
+		memmove(chanm, &dfd, sizeof(int));
+		// yay, ipv6 ready!
+		if (parseip(&chanm[4], info->rsys) != 6)
+			v4parseip(&chanm[4], info->rsys);
 		send(c, chanm);
 		dbgprint(1, "call accepted! \n");
 	}
 	close(lcfd);
+	close(acfd);
 	threadexits(0);	
 }
 
@@ -1023,8 +1026,8 @@ hello2(Peer *peer, Torrent *tor, Channel *c)
 	dbgprint(1, "in hello2\n");
 	bitfieldsize = tor->bitfieldsize;
 
-	/* read handshake */
-	/* at least mainline and rtorrent send their peerid after they got our handshake, so let's read it in two times */
+	// read handshake 
+	// at least mainline and rtorrent send their peerid after they got our handshake, so let's read it in two times 
 	n = HANDSHAKE - PEERIDLEN;
 	if ((m = readn(peerfd, handshake, n)) <= 0){
 		dbgprint(1, "remote side hung up\n");
@@ -1060,7 +1063,7 @@ hello2(Peer *peer, Torrent *tor, Channel *c)
 	// read, should be bitfield or end of handshake (peer id) 
 	peer->bitfield = emalloc(bitfieldsize);
 	if ((m = readmsg(peerfd, peer->bitfield)) != BTbitfield){
-		/* Maybe it was the end of the handshake */
+		// Maybe it was the end of the handshake 
 		if (peer->peerinfo->id == nil){
 			peer->peerinfo->id = emalloc(PEERIDLEN + 1);
 			memmove(peer->peerinfo->id, peer->bitfield, PEERIDLEN);
@@ -1099,8 +1102,8 @@ sharepieces(Peer *peer, Torrent *tor, Channel *c)
 {
 	int pos, block, blocks, blocksgot, pieceup, piecedown;
 	char *msg, *buf, *upload, *download;
-	int index, begin, length, m, peerfd, warmup;
-	int chanmsg[1];
+	int index, begin, length, m, peerfd;
+	uchar chanmsg[1];
 	// for now: 0->block not requested, 1->requested, 2->we got it. change to use bitfields later.
 	char *requested = nil;
 
@@ -1115,8 +1118,6 @@ sharepieces(Peer *peer, Torrent *tor, Channel *c)
 	block = 0;
 	blocks = 0;
 	blocksgot = 0;
-//TODO: that's a quick hack
-//	warmup = 1;
 
 	if (peer->am_interested){
 		// Send "interested" 
@@ -1151,25 +1152,6 @@ sharepieces(Peer *peer, Torrent *tor, Channel *c)
 				threadexits("comm.c: seed(): sending unchoke \n");
 			}
 			peer->am_choking = 0;
-//			if (warmup){
-//				if (peer->am_interested){
-//					// Send "interested" 
-//					if (writemsg(peerfd, BTinterested, nil, nil) != BTinterested){
-//						dbgprint(1, "remote side hung up \n");
-//						freeall(5, msg, buf, upload, download, requested);
-//						return -1;
-//					}
-//				}
-//				else{
-//					if (writemsg(peerfd, BTnotinterested, nil, nil) != BTnotinterested){
-//						dbgprint(1, "remote side hung up \n");
-//						freeall(5, msg, buf, upload, download, requested);
-//						return -1;
-//					}
-//				}
-//				warmup = 0;
-//				continue;			
-//			}
 			break;
 		case BTnotinterested:
 			peer->peer_interested = 0;
@@ -1346,7 +1328,7 @@ sharepieces(Peer *peer, Torrent *tor, Channel *c)
 
 		}
 		chanmsg[0] = 2;
-		send(c,chanmsg);
+		send(c, chanmsg);
 	}
 	freeall(5, msg, buf, upload, download, requested);
 	return 1;

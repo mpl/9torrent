@@ -22,10 +22,14 @@ struct Peerinfo {
 };
 typedef struct Peerinfo Peerinfo;
 
+//TODO: if it turns out the peer_id is too unreliable, maybe we should use an internal id to tag the peers
+typedef struct Peer Peer;
 struct Peer {
 	Peerinfo *peerinfo;
 	int fd;
 	char seeder;
+	Peer *next;
+//TODO: get rid of busy?
 	char busy;
 	char *bitfield;
 	Piece *pieceslist;
@@ -36,7 +40,6 @@ struct Peer {
 	char peer_interested;
 	char sid;
 };
-typedef struct Peer Peer;
 
 /*
  * Torrent.fileborder[i]: index of piece where file i starts. fileborder[0] = 0.
@@ -48,6 +51,7 @@ typedef struct Peer Peer;
 */
 
 //TODO: is this struct getting bloated?
+//TODO: do not store ip addresses in a string form?
 struct Torrent {
 	char *announce;
 	char **announcelist;
@@ -73,8 +77,10 @@ struct Torrent {
 	int *fileborder;
 	int *firstoffset;
 	int lastpiece;
-	Peer **peers;
-	char peersnb;
+	Peer **p_callees;
+	Peer **p_callers;
+	uint p_callersnb;
+	uint p_calleesnb;
 	char *bitfield;
 	int bitfieldsize;
 	Peerinfo **peersinfo;
@@ -93,4 +99,4 @@ void scanpieces(Torrent *tor, char *datadir);
 void preppeerspieces(Torrent *tor, Peer *peer);
 void readdata(ulong index, char *data, Torrent *tor, Peer *peer);
 int updatepeerspieces(Torrent *tor, Peer *peer, int index, char op);
-void freepeer(Peer *peer);
+void freepeer(Peer *peer, Peer ***peerslist);

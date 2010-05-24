@@ -97,23 +97,6 @@ pickrand(int min, int max)
 	return floor(rn);
 }
 
-//TODO: is that really needed?
-char *
-ipcharstostring(char *data)
-{
-	char *buf = malloc(16);
-
-	buf = strcpy(buf,smprint("%d",(uchar)data[0]));
-	buf = strcat(buf,".");
-	buf = strcat(buf,smprint("%d",(uchar)data[1]));
-	buf = strcat(buf,".");
-	buf = strcat(buf,smprint("%d",(uchar)data[2]));
-	buf = strcat(buf,".");
-	buf = strcat(buf,smprint("%d",(uchar)data[3]));
-
-	return buf;
-}
-
 void printbits(char n)
 {
 	char mask, masked;
@@ -174,17 +157,6 @@ createpath(char *path)
 	else
 		dbgprint(1, "%s already exists, not creating it. \n", path);
 	free(dir);
-}
-
-void
-bigE(int N, uchar *buf)
-{
-	buf[0] = N / (int)pow(2,24);
-	buf[1] = (N - buf[0]*(int)pow(2,24)) / (int)pow(2,16);
-	buf[2] = (N - buf[0]*(int)pow(2,24) - buf[1]*(int)pow(2,16)) 
-	/ (int)pow(2,8);
-	buf[3] = N - buf[0]*(int)pow(2,24) - buf[1]*(int)pow(2,16)
-	- buf[2]*(int)pow(2,8);
 }
 
 void

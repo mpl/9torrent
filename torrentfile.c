@@ -202,6 +202,9 @@ getelement(int keytype, Biobuf *bin, Torrent *tor)
 			print("e was expected at end of list\n");
 			return -1;
 		}
+		// since we have the list, we'll set announce with it instead.
+		if (listsize > 0)
+			free(tor->announce);
 		break;
 	case BTcomment:
 		length = readnumber(bin,':');
