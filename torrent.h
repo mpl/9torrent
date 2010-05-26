@@ -38,7 +38,8 @@ struct Peer {
 	char am_interested;
 	char peer_choking;
 	char peer_interested;
-	char sid;
+// we want to recycle that one, or we will run out eventually
+	int num;
 };
 
 /*
@@ -77,8 +78,8 @@ struct Torrent {
 	int *fileborder;
 	int *firstoffset;
 	int lastpiece;
-	Peer **p_callees;
-	Peer **p_callers;
+	Peer *p_callees;
+	Peer *p_callers;
 	uint p_callersnb;
 	uint p_calleesnb;
 	char *bitfield;
@@ -99,4 +100,4 @@ void scanpieces(Torrent *tor, char *datadir);
 void preppeerspieces(Torrent *tor, Peer *peer);
 void readdata(ulong index, char *data, Torrent *tor, Peer *peer);
 int updatepeerspieces(Torrent *tor, Peer *peer, int index, char op);
-void freepeer(Peer *peer, Peer ***peerslist);
+void freepeer(Peer *peer, Peer **listhead);

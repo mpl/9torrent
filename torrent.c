@@ -639,32 +639,28 @@ updatepeerspieces(Torrent *tor, Peer *peer, int index, char op)
 	return 0;
 }
 
-//TODO: if it turns out the peer_id is too unreliable, maybe we should use an internal id to tag the peers
+/*
+it can happen that we have to free a peer and we don't have a peer_id
+for it, case in point: tracker was in binary model so we didn't get
+the peer id from it, and hello1 fails at dial because (for example)
+the peer does not exist anymore at this address.
+=> let's use an internal id to tag our peers.
+*/
+
+//TODO: using both linked list and an "array" is a terrible idea. get rid of the array.
 void 
-freepeer(Peer *peer, Peer ***peerslist)
+freepeer(Peer *peer, Peer **listhead)
 {
 	Piece *lister, *rimmer;
 	Peer *current, *previous;
 
-	// not sure yet if can rely on peerid at all times, so let's asplode for the time being 
-	if (strcmp(peer->peerinfo->address, "127.0.0.1") != 0
-	&& peer->peerinfo->id == nil){
-		print("freepeer: no peerid");
-		error("freepeer: no peerid");
-	}
-
 	// find the peer in the list and detach it from there
-	current = **peerslist;
+	current = *listhead;
 	previous = current;
 	while (current != nil){
-		if (strcmp(current->peerinfo->address, "127.0.0.1") != 0
-		&& current->peerinfo->id == nil){
-			print("freepeer: no peerid");
-			error("freepeer: no peerid");
-		}
-		if (strcmp(current->peerinfo->id, peer->peerinfo->id) == 0){
+		if (peer->num == current->num){
 			if (previous == current)
-				*peerslist = &(current->next);
+				*listhead = current->next;
 			else
 				previous->next = current->next;
 			current->next = nil;
@@ -673,11 +669,13 @@ freepeer(Peer *peer, Peer ***peerslist)
 		previous = current;
 		current = current->next;
 	}
+	print("beepdog \n");
 
 	// now actually free some stuff		
 	free(peer->peerinfo->address);
 	free(peer->peerinfo->id);
 	free(peer->peerinfo);
+//TODO: in cases where we fail early we probably don't have a bitfield yet
 	free(peer->bitfield);
 	lister = peer->pieceslist;
 	rimmer = lister;

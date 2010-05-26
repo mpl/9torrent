@@ -761,7 +761,7 @@ hello1(Peer *peer, Torrent *tor, Channel *c)
 	free(params->fd);
 	free(params);
 	if(peerfd < 0){
-		fprint(2, "can't dial %s: %r\n", peer->peerinfo->address);
+		fprint(2, "can't dial %s %r\n", peer->peerinfo->address);
 		return -1;
 	}
 	chanmsg[0] = 1;

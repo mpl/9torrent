@@ -105,7 +105,7 @@ callee(void *arg)
 	print("callee [%d] starting\n", threadid());
 	chatpeer(params->tor, params->peer, params->c, 2);
 	params->tor->p_callersnb--;
-//	freepeer(params->peer, &(params->tor->p_callees));
+	freepeer(params->peer, &(params->tor->p_callers));
 //	chanfree(params->c);
 //	free(params);
 	print("callee [%d] terminated\n", threadid());
@@ -116,6 +116,7 @@ static void
 callees(void *arg)
 {
 	Torrent *tor;
+	Peer *peer;
 	Alt *a = 0;
 	// 4 bytes for the accept fd, and 16 for the ip address 
 	uchar chanm[20];
@@ -123,6 +124,7 @@ callees(void *arg)
 	int n;
 	struct Params{Torrent *tor; Peer *peer; Channel *c;} *params;
 	int pfd;
+	int num = 1;
 
 	tor = arg;
 	// first start the listener 
@@ -135,6 +137,7 @@ callees(void *arg)
 	a[1].op = CHANEND;
 	proccreate(listener, a[0].c, STACK);
 
+//TODO: manage the table of alts ?
 	// Then start a new callee thread everytime the listener receives a call
 	for(;;){
 		n = alt(a);
@@ -160,15 +163,24 @@ callees(void *arg)
 				a[counter-1].op = CHANRCV;
 	
 				// add a new caller peer to the list
-				tor->p_callers = erealloc(tor->p_callers, (tor->p_callersnb + 1) * sizeof(Peer *));
-				tor->p_callers[tor->p_callersnb] = emalloc(sizeof(Peer));
-				if (tor->p_callersnb > 0)
-					tor->p_callers[tor->p_callersnb - 1]->next = tor->p_callers[tor->p_callersnb];
+				if (tor->p_callersnb == 0){
+					// head of the list
+					tor->p_callers = emalloc(sizeof(Peer));
+					peer = tor->p_callers;
+				}
+				else {
+					peer->next = emalloc(sizeof(Peer));
+					peer = peer->next;
+				}
+				peer->next = nil;
+				peer->num = num;
 				tor->p_callersnb++;
+				// use odds here and evens in callers
+				num += 2;
 				
 				// prepare params for the thread
 				params = emalloc(sizeof(struct Params));
-				params->peer = tor->p_callers[tor->p_callersnb - 1];
+				params->peer = peer;
 				params->peer->fd = pfd;
 				params->tor = tor;
 				params->c = a[counter-1].c;
@@ -193,6 +205,9 @@ initstuff(Torrent *tor)
 	tor->peersinfonb = 0;
 	tor->peersinfo = nil;
 	tor->p_callersnb = 0;
+	tor->p_calleesnb = 0;
+	tor->p_callees = nil;
+	tor->p_callers = nil;
 
 	fmtinstall('V', eipfmt);
 	fmtinstall('I', eipfmt);
@@ -244,7 +259,7 @@ caller(void *arg)
 	chatpeer(params->tor, params->peer, params->c, 1);
 	chanmsg[0] = 7;
 	send(params->c, chanmsg);
-//	freepeer(params->peer, &(params->tor->p_callees));
+	freepeer(params->peer, &(params->tor->p_callees));
 //TODO: freeing the chan makes next call to alt() fail. why? Not really a pb in itself tho, as I can/will reuse those channels. But it might be a hint at something amiss.
 //	chanfree(params->c);
 //	free(params);
@@ -257,33 +272,50 @@ void
 callers(void *arg)
 {
 	Torrent *tor = arg;
+	Peer *peer;
 	uchar m[1];
 	int i;
 	int n;
 	Alt *a = 0;
 	struct Params{Torrent *tor; Peer *peer; Channel *c;} *params;
+	int num = 0;
 
 	for (i = 0; i<tor->peersinfonb; i++){
 		// allow only for a total of maxpeers peers
 		if (tor->p_callersnb + tor->p_calleesnb < maxpeers){
-			tor->p_callees = erealloc(tor->p_callees, (i+1) * sizeof(Peer *));
-			tor->p_callees[i] = emalloc(sizeof(Peer));
-			tor->p_callees[i]->busy = 1;
-			tor->p_callees[i]->peerinfo = emalloc(sizeof(Peerinfo));
-			tor->p_callees[i]->peerinfo->address = smprint("%s", tor->peersinfo[i]->address);
-			tor->p_callees[i]->peerinfo->port = tor->peersinfo[i]->port;
+			// add a new callee peer to the list
+			if (tor->p_calleesnb == 0){
+				tor->p_callees = emalloc(sizeof(Peer));
+				peer = tor->p_callees;
+			}
+			else{
+				peer->next = emalloc(sizeof(Peer));
+				peer = peer->next;
+			}
+			peer->next = nil;
+			peer->busy = 1;
+			peer->peerinfo = emalloc(sizeof(Peerinfo));
+			peer->peerinfo->address = smprint("%s", tor->peersinfo[i]->address);
+			peer->peerinfo->port = tor->peersinfo[i]->port;
 			if (tor->peersinfo[i]->id != nil)
-				tor->p_callees[i]->peerinfo->id = smprint("%s", tor->peersinfo[i]->id);
+				peer->peerinfo->id = smprint("%s", tor->peersinfo[i]->id);
 			else
-				tor->p_callees[i]->peerinfo->id = nil;
+				peer->peerinfo->id = nil;
+			peer->num = num;
 			tor->p_calleesnb++;
+			// use evens here and odds in callees
+			num += 2;
+
+			// add a new Alt entry 
 			a = erealloc(a, (i+1)*sizeof(Alt));
 			a[i].v = m;
 			a[i].c = chancreate(sizeof(m), 0);
 			a[i].op = CHANRCV;
+
+			// prepare params for the thread
 			params = emalloc(sizeof(struct Params));
 			params->tor = tor;
-			params->peer = tor->p_callees[i];
+			params->peer = peer;
 			params->c = a[i].c;
 			threadcreate(caller, params, STACK);
 			dbgprint(1, "caller thread #%d started\n", i);
