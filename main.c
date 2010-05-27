@@ -434,7 +434,8 @@ threadmain(int argc, char **argv)
 	filltree(fs.tree->root);
 	threadpostmountsrv(&fs, nil, mtpt, MREPL|MCREATE);
 	setpeerid();
-	torrents[0] = addtorrent("/usr/glenda/local.torrent");
+	torrents[0] = addtorrent("/usr/glenda/silence.torrent");
+	threadexits(0);
 	// start the listeners
 	if (!onlycall)
 		proccreate(callees, torrents[0], STACK);

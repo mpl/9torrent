@@ -48,6 +48,7 @@ static enum Btfilekeys {
 	BTcodepage,
 	BTpublisher, BTutf8publisher, BTpublisherurl, BTutf8publisherurl,
 	BTnodes,
+	BThttpseeds,
 	BTunknown,
 };
 

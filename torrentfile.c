@@ -7,7 +7,7 @@
 #include "torrent.h"
 #include "torrentfile.h"
 
-static int nkeys = 24 ;
+static int nkeys = 25 ;
 
 static Rune *keystab[] = {
 	L"announce",
@@ -28,6 +28,7 @@ static Rune *keystab[] = {
 	L"codepage",
 	L"publisher", L"publisher.utf-8", L"publisher-url", L"publisher-url.utf-8",
 	L"nodes",
+	L"httpseeds",
 	L"unknown",
 };
 
@@ -88,6 +89,7 @@ getkey(Biobuf *bin)
 	Bestring *key;
 	int keytype;
 
+	// default is "unknown"
 	keytype = nkeys-1;	
 	if ((length = readnumber(bin,':')) == 0) 
 		return -1;
@@ -99,6 +101,8 @@ getkey(Biobuf *bin)
 			break;
 		}
 	}
+	if (keytype == nkeys-1)
+		dbgprint(1, "unknown key, skipping.\n");
 	free(key->value);
 	free(key);
 	return keytype;
@@ -408,8 +412,18 @@ getelement(int keytype, Biobuf *bin, Torrent *tor)
 		if (hint != 'e')
 			error("e was expected at end of list\n");
 		break;
+	case BThttpseeds:
+		if ((hint = Bgetrune(bin)) <= 0 || hint != 'l')
+			error("pb with list prefix\n");
+		for(;;){
+			getelement(BTunknown, bin, tor);
+			if ((hint = Bgetrune(bin)) == 'e')
+				break;
+			else
+				Bungetrune(bin);
+		}
+		break;	
 	case BTunknown:
-		dbgprint(1, "unknown key, skipping.\n");
 		/*
 		try and skip to the next element because we just
 		do not care. yay for recursion!
@@ -421,9 +435,15 @@ getelement(int keytype, Biobuf *bin, Torrent *tor)
 			dbgprint(1, "integer value: %d\n", length);
 			break;
 		case 'l':
-			getelement(BTunknown, bin, tor);
-			if ((hint = Bgetrune(bin)) != 'e')
-				error("e was expected at end of list\n");
+			for(;;){
+				getelement(BTunknown, bin, tor);
+				if ((hint = Bgetrune(bin)) == 'e'){
+					dbgprint(1, "end of unknown list\n");
+					break;
+				}
+				else
+					Bungetrune(bin);
+			}
 			break;
 		case 'd':
 			for(;;){ 
@@ -437,7 +457,7 @@ getelement(int keytype, Biobuf *bin, Torrent *tor)
 			Bungetrune(bin);
 			length = readnumber(bin,':');
 			bestr = getbestr(length, bin);
-			dbgprint(1, "string value: %S\n", bestr->value);
+			dbgprint(1, "%S\n", bestr->value);
 			free(bestr->value);
 			free(bestr);
 			break;
