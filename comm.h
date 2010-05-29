@@ -1,5 +1,4 @@
 
-#define XFERSIZE 50
 #define PSTRLEN 19
 #define REQSIZE 16384
 #define POOLSIZE 20

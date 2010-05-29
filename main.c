@@ -208,6 +208,7 @@ initstuff(Torrent *tor)
 	tor->p_calleesnb = 0;
 	tor->p_callees = nil;
 	tor->p_callers = nil;
+	tor->interval = 1800;
 
 	fmtinstall('V', eipfmt);
 	fmtinstall('I', eipfmt);

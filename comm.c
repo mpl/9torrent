@@ -17,21 +17,23 @@ QLock l;
 //Ioproc *io;
 
 static char *
-xfer(int from)
+readfile(int from)
 {
-	int datasize;
+	int readsize;
 	int n, offset;
 	char *to = nil;
 	
-	datasize = XFERSIZE;
-	to = emallocz(datasize,1);
+	readsize = 32;
+	to = emallocz(readsize,1);
 	offset = 0;
-	while((n = readn(from, to+offset, XFERSIZE)) > 0){
-		if (n < XFERSIZE) 
+	for(;;){
+		n = read(from, &to[offset], readsize);
+		if (n < readsize && n > 0){
+			to = erealloc(to, offset + n);
 			break;
-		datasize = datasize + XFERSIZE;
-		to = erealloc(to, datasize);
-		offset = offset + XFERSIZE;
+		}
+		offset+=readsize;
+		to = erealloc(to, offset + readsize);
 	}
 	if(n < 0) {
 		free(to);
@@ -301,6 +303,7 @@ calltracker(Torrent *tor, char *reqtype)
 				sysfatal("couldn't open %s: %r", tmpfile);
 			hgetargs[1] = smprint("%s", msg);
 			dup(tmpfd, 1);
+			dup(tmpfd, 2);
 			exec("/bin/hget", hgetargs);
 		}
 		if (waitpid() < 0)
@@ -309,8 +312,7 @@ calltracker(Torrent *tor, char *reqtype)
 		// check the reply.
 		if ((tmpfd = open(tmpfile, OREAD)) < 0)
 			sysfatal("open %r");
-//TODO: do it simpler and get rid of xfer
-		reply = xfer(tmpfd);
+		reply = readfile(tmpfd);
 		close(tmpfd);
 		dbgprint(1, "tracker reply: %s\n", reply);
 		buf = emalloc(13);
@@ -371,7 +373,7 @@ calltracker(Torrent *tor, char *reqtype)
 			dbgprint(1, "peer->address: %s\n",peer->address);
 		}
 	}
-	free(reply);
+//	free(reply);
 	free(msg);
 }
 
