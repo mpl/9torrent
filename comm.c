@@ -8,6 +8,7 @@
 #include "torrent.h"
 #include "comm.h"
 
+char tmpfile[] = "/tmp/tracker_reply";
 extern char mypeerid[];
 extern char *port;
 extern maxpeers;
@@ -273,63 +274,74 @@ parsetrackerreply(char *reply, Torrent *tor)
 void
 calltracker(Torrent *tor, char *reqtype)
 {
-	int conn, ctlfd, from, n;
-	char buf[128];
-	char *mtpt = "/mnt/web";
+	int tmpfd;
 	char *reply = nil;
 	char *msg = nil;
+	char *buf = nil;
 	Peerinfo **peers = nil;
 	Peerinfo *peer = nil;
-	int notracker = 0;
 	int i = 0;
+	char *hgetargs[] = {"/bin/hget/", nil, nil};
 
-//TODO: we'll have to call again all the trackers inbefore their interval, so we'll have to set the timeout according to how many we have to call.
-//TODO: now we're just overwriting the peersinfos at everycall; we should do better.
-	if(!notracker){
-		for(;;){
-//			if (tor->announcelist != nil && tor->announcelist[i] != nil)
-			if (tor->annlistsize > 0)
-				tor->announce = tor->announcelist[i];
-			msg = forgerequest(tor, reqtype);
-			// webfs dance 
-			snprint(buf, sizeof buf, "%s/clone", mtpt);
-			if((ctlfd = open(buf, ORDWR)) < 0)
-				sysfatal("couldn't open %s: %r", buf);
-			if((n = read(ctlfd, buf, sizeof buf-1)) < 0)
-				sysfatal("reading clone: %r");
-			if(n == 0)
-				sysfatal("short read on clone");
-			buf[n] = '\0';
-			conn = atoi(buf);
-			dbgprint(1, "query: %s\n", msg);
-			// "actual" request 
-			if(fprint(ctlfd, "url %s", msg) <= 0){
-//				sysfatal("get ctl write: %r");
+//TODO: now we're just overwriting the peersinfos at everycall; we should do better. Also we should try to get peers from as many trackers as possible, not stop as soon as we get a tracker reply.
+	/*
+	try all trackers if necessary then get out.
+	calltracker will be recalled later anyway.
+	*/
+	for(;;){
+		if (tor->annlistsize > 0)
+			tor->announce = tor->announcelist[i];
+		msg = forgerequest(tor, reqtype);
+
+//TODO: skip the udp ones
+
+		// call the tracker
+		if (fork() ==  0){
+			if ((tmpfd = create(tmpfile, OWRITE, 0644)) < 0)
+				sysfatal("couldn't open %s: %r", tmpfile);
+			hgetargs[1] = smprint("%s", msg);
+			dup(tmpfd, 1);
+			exec("/bin/hget", hgetargs);
+		}
+		if (waitpid() < 0)
+			sysfatal("waitpid %r");
+
+		// check the reply.
+		if ((tmpfd = open(tmpfile, OREAD)) < 0)
+			sysfatal("open %r");
+//TODO: do it simpler and get rid of xfer
+		reply = xfer(tmpfd);
+		close(tmpfd);
+		dbgprint(1, "tracker reply: %s\n", reply);
+		buf = emalloc(13);
+		memmove(buf, reply, 13);
+		buf[12] = '\0';
+		if (strstr(buf, "hget") != 0){
+			dbgprint(1, "query to %s failed \n", tor->announce);
+			if (tor->annlistsize == 0)
+				break;
+			if (i < tor->annlistsize - 1)
+				i++;
+			else
+				break;
+			sleep(1000);
+		} else {
+			if (strstr(buf, "fail") != 0){
+				dbgprint(1, "%s replied with failure \n", tor->announce);
+				if (tor->annlistsize == 0)
+					break;				
 				if (i < tor->annlistsize - 1)
 					i++;
 				else
-					i = 0;
-			} else{
-				snprint(buf, sizeof buf, "%s/%d/body", mtpt, conn);
-				// "actual" read 
-				if((from = open(buf, OREAD)) < 0){
-					//sysfatal("open %s: %r", buf);
-					if (i < tor->annlistsize - 1)
-						i++;
-					else
-						i = 0;
-				}else
-					break;
+					break;				
+				sleep(1000);
 			}
-		}			
+			else 
+				break;
+		}	
+
 	}
-	//TODO: remove this when testing is over
-	else{
-		if((from = open("/usr/glenda/tracker_reply", OREAD)) < 0)
-			sysfatal("open %s: %r", buf);
-	}	
-	reply = xfer(from);
-	dbgprint(1, "tracker reply: %s\n", reply);
+	free(buf);				
 
 	if (parsetrackerreply(reply, tor) <= 0){
 		dbgprint(1, "no peers harvested\n");

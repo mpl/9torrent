@@ -669,7 +669,6 @@ freepeer(Peer *peer, Peer **listhead)
 		previous = current;
 		current = current->next;
 	}
-	print("beepdog \n");
 
 	// now actually free some stuff		
 	free(peer->peerinfo->address);

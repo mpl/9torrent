@@ -343,6 +343,7 @@ callers(void *arg)
 	threadexits(0);	
 }
 
+//TODO: we'll have to call again all the trackers inbefore their interval, so we'll have to set the timeout according to how many we have to call.
 static void
 poketracker(void *arg)
 {
@@ -434,8 +435,7 @@ threadmain(int argc, char **argv)
 	filltree(fs.tree->root);
 	threadpostmountsrv(&fs, nil, mtpt, MREPL|MCREATE);
 	setpeerid();
-	torrents[0] = addtorrent("/usr/glenda/silence.torrent");
-	threadexits(0);
+	torrents[0] = addtorrent("/usr/glenda/local.torrent");
 	// start the listeners
 	if (!onlycall)
 		proccreate(callees, torrents[0], STACK);
