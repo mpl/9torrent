@@ -373,7 +373,7 @@ calltracker(Torrent *tor, char *reqtype)
 			dbgprint(1, "peer->address: %s\n",peer->address);
 		}
 	}
-//	free(reply);
+	free(reply);
 	free(msg);
 }
 
