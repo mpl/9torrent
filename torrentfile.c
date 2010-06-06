@@ -183,29 +183,29 @@ getelement(int keytype, Biobuf *bin, Torrent *tor)
 			print("pb with list prefix\n");
 			return -1;
 		}
-		while ((hint = Bgetrune(bin)) == 'l'){
-			length = readnumber(bin,':');
-			bestr = getbestr(length, bin);
-			listsize++;
-			//annlist = erealloc(annlist, listsize * sizeof(Rune *));
-			annlist = erealloc(annlist, listsize * sizeof(char *));
-			annlist[listsize - 1] = emalloc((length+1)*sizeof(char));
-			for (int i=0; i<length+1; i++) 
-				runetochar(&(annlist[listsize - 1][i]),&(bestr->value[i]));
-			//annlist[listsize - 1] = bestr->value;
-			free(bestr->value);
-			free(bestr);
-			if ((hint = Bgetrune(bin)) != 'e'){
-				print("e was expected at end of list\n");
+		while ((hint = Bgetrune(bin)) != 'e'){
+			if (hint != 'l'){
+				print("pb with list prefix\n");
 				return -1;
 			}
+			while ((hint = Bgetrune(bin)) != 'e'){
+				// we can have several urls in the same list
+				if (hint != 'l')
+					Bungetrune(bin);
+				length = readnumber(bin,':');
+				bestr = getbestr(length, bin);
+				listsize++;
+				//annlist = erealloc(annlist, listsize * sizeof(Rune *));
+				annlist = erealloc(annlist, listsize * sizeof(char *));
+				annlist[listsize - 1] = emalloc((length+1)*sizeof(char));
+				for (int i=0; i<length+1; i++) 
+					runetochar(&(annlist[listsize - 1][i]),&(bestr->value[i]));
+				free(bestr->value);
+				free(bestr);
+			}
+		}
 		tor->announcelist = annlist;
 		tor->annlistsize = listsize;
-		}
-		if (hint != 'e'){
-			print("e was expected at end of list\n");
-			return -1;
-		}
 		// since we have the list, we'll set announce with it instead.
 		if (listsize > 0)
 			free(tor->announce);
