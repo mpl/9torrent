@@ -1061,7 +1061,12 @@ hello2(Peer *peer, Torrent *tor, Channel *c)
 	handshake[0] = PSTRLEN;
 	pos = 1;
 	memmove(&handshake[pos], pstr, PSTRLEN);
-	pos = 1 + PSTRLEN + 8;
+	pos+= PSTRLEN;
+	// zero the reserved bits
+	for (int i = 0; i<8 ; i++){
+		handshake[pos] = 0;
+		pos++;
+	}
 	memmove(&handshake[pos], tor->infohash, HASHSIZE);
 	pos +=  HASHSIZE;
 	memmove(&handshake[pos], mypeerid, PEERIDLEN);
