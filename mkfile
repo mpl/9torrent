@@ -2,9 +2,11 @@
 
 OFILES=\
 	misc.$O			\
-	torrent.$O		\
+	pieces.$O		\
 	torrentfile.$O	\
-	comm.$O 		\
+	tracker.$O		\
+	talk.$O 		\
+	peers.$O		\
 	fs.$O	 		\
 	main.$O		
 
@@ -26,6 +28,10 @@ tidy:V:
 	broke | rc
 	kill btfs | rc
 
+torrented:V:
+	$CC $CFLAGS torrented.c
+	$LD $LDFLAGS -o torrented torrented.$O
+
 ps:	btfs.ms
 	troff -ms -o1-3 btfs.ms | lp -dstdout > /tmp/btfs.ps
 
@@ -43,3 +49,4 @@ peers:V:
 	cd /usr/glenda/leecher2/; rm -rf funky portal/
 	dircp /usr/glenda/seeder/ /usr/glenda/leecher3/
 	cd /usr/glenda/leecher3/; rm -rf funky kryptonite.flv
+

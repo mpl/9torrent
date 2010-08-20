@@ -3,9 +3,11 @@
 #include <fcall.h>
 #include <thread.h> 
 #include <9p.h>
+#include <bio.h>
 #include <pool.h>
 #include "misc.h"
-#include "torrent.h"
+#include "dat.h"
+#include "fns.h"
 
 /* Note for self: the Files get a corresponding qid.path directly correlated to the order in which they are created. starting from 0. */
 

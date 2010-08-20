@@ -1,4 +1,3 @@
-#define STACK 16384
 
 void error(char *s);
 void *erealloc(void *v, ulong n);

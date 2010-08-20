@@ -2,35 +2,13 @@
 #include <libc.h>
 #include <bio.h>
 #include <libsec.h>
+#include <thread.h>
 #include <pool.h>
 #include "misc.h"
-#include "torrent.h"
-#include "torrentfile.h"
+#include "dat.h"
+#include "fns.h"
 
 static int nkeys = 25 ;
-
-static Rune *keystab[] = {
-	L"announce",
-	L"announce-list",
-	L"info",
-	L"creation date",
-	L"comment",
-	L"created by",
-	L"encoding",
-	L"pieces",
-	L"piece length",
-	L"private",
-	L"name", L"name.utf-8",
-	L"length",
-	L"md5sum",
-	L"files",
-	L"path", L"path.utf-8",
-	L"codepage",
-	L"publisher", L"publisher.utf-8", L"publisher-url", L"publisher-url.utf-8",
-	L"nodes",
-	L"httpseeds",
-	L"unknown",
-};
 
 static Bestring *
 getbestr(long toread, Biobuf *bin){
@@ -95,9 +73,9 @@ getkey(Biobuf *bin)
 		return -1;
 	key = getbestr(length, bin);
 	for (int i = 0; i < nkeys; i++) {
-		if (runestrcmp(key->value, keystab[i]) == 0) {
+		if (runestrcmp(key->value, metakeys[i]) == 0) {
 			keytype=i;
-			dbgprint(1, "key found: %S\n", keystab[i]);
+			dbgprint(1, "key found: %S\n", metakeys[i]);
 			break;
 		}
 	}

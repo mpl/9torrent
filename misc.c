@@ -2,17 +2,15 @@
 #include <libc.h>
 #include <pool.h>
 #include <thread.h>
-#include "misc.h"
 
 extern int verbose;
 
-/* remove abort when debugging's over */
 void
 error(char *s)
 {
 	fprint(2, "%s: %r\n", s);
 	//abort();
-	threadexitsall("Cannot recover, terminate.");
+	threadexitsall("");
 }
 
 void*
@@ -172,4 +170,3 @@ freeall(int num, ...)
 	}
 	va_end(arg);
 }
-

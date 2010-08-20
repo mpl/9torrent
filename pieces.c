@@ -1,12 +1,14 @@
 #include <u.h>
 #include <libc.h>
 #include <libsec.h>
+#include <bio.h>
+#include <thread.h>
 #include <pool.h>
 #include "misc.h"
-#include "torrent.h"
+#include "dat.h"
+#include "fns.h"
 
 extern char mypeerid[];
-extern char *port;
 
 /*
  * creates our linked list of Pieces and set other info such as file
@@ -286,74 +288,6 @@ preppeerspieces(Torrent *tor, Peer *peer)
 	}
 	free(rimmer);
 	kryten->next = nil;
-}
-
-char *
-forgerequest(Torrent *tor, char *req)
-{
-	char *announce;
-	int length;
-	char *baseurl;
-	char infohash[3*HASHSIZE+1]; 
-	char peerid[3*PEERIDLEN+1]; 
-	int len = strlen(tor->announce);
-	char *buf = emalloc((512)*sizeof(char));
-
-	/*
-	Is it really fair to bail out if announce url
-	doesn't contain "announce"?
-	*/
-	if((announce = strstr(tor->announce, "announce")) == 0)
-		error("weird announce url");
-	length = strlen(announce);
-	len = len - length;
-
-	baseurl = emalloc((len+1)*sizeof(char));
-	baseurl = strncpy(baseurl,tor->announce,len);
-	baseurl[len] = '\0';		
-
-	for (int i = 0; i<HASHSIZE; i++){
-		infohash[3*i] = '%';
-		sprint(&(infohash[3*i+1]),"%.2ux", tor->infohash[i]);
-	}
-	infohash[3*HASHSIZE] = '\0';
-
-	for (int i = 0; i<20; i++){
-		peerid[3*i] = '%';
-		sprint(&(peerid[3*i+1]),"%.2x", mypeerid[i]);
-	}
-	infohash[3*PEERIDLEN] = '\0';
-
-	if (strcmp(req, "scrape") == 0){
-		/*
-		No need to realloc precisely, just use a big enough buffer
-		redo it like for announce
-
-		buf = erealloc(buf,(len+7+10+3*HASHSIZE+1)*sizeof(char));
-		buf = strcpy(buf, baseurl);
-		buf = strcat(buf,"scrape?info_hash=");
-		buf = strcat(buf,infohash);
-		*/
-	}
-	else if (strcmp(req, "announce") == 0){
-		buf = strcpy(buf, baseurl);
-		buf = strcat(buf, announce);
-		buf = strcat(buf,"?info_hash=");
-		buf = strcat(buf,infohash);
-		buf = strcat(buf,"&port=");
-		buf = strcat(buf,port);
-		buf = strcat(buf,"&uploaded=0&downloaded=0&left=0&event=started");
-/*
-sending compact=0 will in fact result in compact replies! 
-*/
-		//buf = strcat(buf,"&compact=0");
-		//buf = strcat(buf,"&ip=127.0.0.1");
-		buf = strcat(buf,"&peer_id=");
-		buf = strcat(buf,peerid);
-	}
-
-	free(baseurl);
-	return buf;
 }
 
 void
@@ -639,49 +573,3 @@ updatepeerspieces(Torrent *tor, Peer *peer, int index, char op)
 	return 0;
 }
 
-/*
-it can happen that we have to free a peer and we don't have a peer_id
-for it, case in point: tracker was in binary model so we didn't get
-the peer id from it, and hello1 fails at dial because (for example)
-the peer does not exist anymore at this address.
-=> let's use an internal id to tag our peers.
-*/
-
-//TODO: using both linked list and an "array" is a terrible idea. get rid of the array.
-void 
-freepeer(Peer *peer, Peer **listhead)
-{
-	Piece *lister, *rimmer;
-	Peer *current, *previous;
-
-	// find the peer in the list and detach it from there
-	current = *listhead;
-	previous = current;
-	while (current != nil){
-		if (peer->num == current->num){
-			if (previous == current)
-				*listhead = current->next;
-			else
-				previous->next = current->next;
-			current->next = nil;
-			break;
-		}
-		previous = current;
-		current = current->next;
-	}
-
-	// now actually free some stuff		
-	free(peer->peerinfo->address);
-	free(peer->peerinfo->id);
-	free(peer->peerinfo);
-//TODO: in cases where we fail early we probably don't have a bitfield yet
-	free(peer->bitfield);
-	lister = peer->pieceslist;
-	rimmer = lister;
-	while(lister != nil){
-		lister = rimmer->next;
-		free(rimmer);
-		rimmer = lister;
-	}
-	free(peer);
-}
