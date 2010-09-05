@@ -140,31 +140,6 @@ addtorrent(char *torrentfile)
 	return tor;
 }
 
-//TODO: we'll have to call again all the trackers inbefore their interval, so we'll have to set the timeout according to how many we have to call.
-static void
-poketrackers(void *arg)
-{
-	struct Params{ Torrent *tor; char *reqtype; Channel *c;} *params;
-	int interval;
-	int firstcall = 1;
-	uchar chanmsg[1] = {1};
-
-	params = arg;
-	for (;;){
-		interval = params->tor->interval * 95 / 100;
-		calltrackers(params->tor, params->reqtype, interval);
-// we attempt to call again when 95% of the interval time has passed,
-// to allow for various delays
-		if (firstcall){
-			send(params->c, chanmsg);
-			chanfree(params->c);
-			firstcall = 0;
-		}
-//		sleep(interval * 1000);
-	}
-}
-
-
 static void
 usage(void)
 {
@@ -182,9 +157,6 @@ threadmain(int argc, char **argv)
 	port = smprint("%s", "6889");
 	Dir *dir;
 	int fd;
-	uchar chanmsg[1];
-	Channel *c;
-	struct Params{ Torrent *tor; char *reqtype; Channel *c;} *params;
 
 //TODO: add maxpeers, keep nocalling and nolisten (usefull for debugging) but maybe with other flags
 	ARGBEGIN{
@@ -234,18 +206,9 @@ threadmain(int argc, char **argv)
 	setpeerid();
 	torrents[0] = addtorrent("/usr/glenda/local.torrent");
 	// start the listeners
+//TODO: we need to detect successfull dl from callees as well
 	if (!onlycall)
 		proccreate(callees, torrents[0], STACK);
-	// prepare the tracker caller
-	c = chancreate(sizeof(chanmsg), 0);
-	params->reqtype = smprint("announce");
-	params->c = c;
-	params->tor = torrents[0];
-//TODO: maybe use a simple coroutine along with the callers instead of a standalone proc?
-	proccreate(poketrackers, params, STACK);
-	// wait for the first call to the tracker to finish
-	recv(c, chanmsg);
-	// start the callers
 	if (!onlylisten)
 		proccreate(callers, torrents[0], STACK);
 	threadexits(0);

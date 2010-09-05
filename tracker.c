@@ -275,9 +275,9 @@ parsetrackerreply(char *reply, Torrent *tor)
 }
 
 static int
-forgerequest(Torrent *tor, char *req, char *buf)
+forgerequest(Torrent *tor, char *req, char **msg)
 {
-	char *announce;
+	char *announce, *buf;
 	int length;
 	char *baseurl;
 	char infohash[3*HASHSIZE+1]; 
@@ -338,24 +338,30 @@ sending compact=0 will in fact result in compact replies!
 		//buf = strcat(buf,"&ip=127.0.0.1");
 		buf = strcat(buf,"&peer_id=");
 		buf = strcat(buf,peerid);
+		print("%s", buf);
 	}
 
-	free(announce);
+	*msg = erealloc(*msg, (512)*sizeof(char));
+	*msg = strcpy(*msg, buf);
+	free(buf);
 	free(baseurl);
 	return 1;
 }
 
-void
-calltrackers(Torrent *tor, char *reqtype, int interval)
+//use messages to sync with other threads from callers():
+// 0 means we're working on peersinfo, 1 means not working on it, 2 means not working on it, but no peers collected yet
+static void
+calltrackers(Torrent *tor, char *reqtype, int interval, Channel *c)
 {
 	int tmpfd;
-	char *reply = nil;
-	char *msg = nil;
-	char *buf = nil;
+	char *reply = emalloc(1);
+	char *msg;
+	char buf[13];
 	Peerinfo **peers = nil;
 	Peerinfo *peer = nil;
 	int i = 0;
 	char *hgetargs[] = {"/bin/hget/", nil, nil};
+	uchar m[1];
 
 //TODO: now we're just overwriting the peersinfos at everycall; we should do better. Also we should try to get peers from as many trackers as possible, not stop as soon as we get a tracker reply.
 	/*
@@ -366,8 +372,7 @@ calltrackers(Torrent *tor, char *reqtype, int interval)
 		for(;;) {
 			if (tor->annlistsize > 0)
 				tor->announce = tor->announcelist[i];
-			free(msg);
-			if (forgerequest(tor, reqtype, msg) < 0) 
+			if (forgerequest(tor, reqtype, &msg) < 0) 
 				sysfatal("");
 	
 	//TODO: skip the udp ones
@@ -390,7 +395,6 @@ calltrackers(Torrent *tor, char *reqtype, int interval)
 			reply = readfile(tmpfd);
 			close(tmpfd);
 			dbgprint(1, "tracker reply: %s\n", reply);
-			buf = erealloc(buf, 13);
 			memmove(buf, reply, 13);
 			buf[12] = '\0';
 			if (strstr(buf, "hget") != 0){
@@ -418,10 +422,13 @@ calltrackers(Torrent *tor, char *reqtype, int interval)
 					break;
 			}
 		}
-		freeall(2, msg, buf);
+		m[0] = 0;
+		send(c, m);
 		if (parsetrackerreply(reply, tor) <= 0){
 			dbgprint(1, "no peers harvested with %s \n", tor->announce);
-			free(reply);
+			m[0] = 2;
+			send(c, m);
+			sleep(interval);
 		} else {
 			break;
 		}
@@ -452,4 +459,26 @@ calltrackers(Torrent *tor, char *reqtype, int interval)
 			dbgprint(1, "peer->address: %s\n",peer->address);
 		}
 	}
+	free(msg);
+	m[0] = 1;
+	send(c, m);
 }
+
+//TODO: we'll have to call again all the trackers inbefore their interval, so we'll have to set the timeout according to how many we have to call.
+void
+poketrackers(void *arg)
+{
+	struct Params{ Torrent *tor; char *reqtype; Channel *c;} *params;
+	int interval;
+	uchar m[1];
+
+	params = arg;
+	for (;;){
+		// we attempt to call again when 95% of the interval time has passed,
+		// to allow for various delays
+		interval = params->tor->interval * 950;
+		m[0] = 0;
+		calltrackers(params->tor, params->reqtype, interval, params->c);
+	}
+}
+

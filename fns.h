@@ -9,9 +9,8 @@ void scanpieces(Torrent *tor, char *datadir);
 void preppeerspieces(Torrent *tor, Peer *peer);
 void readdata(ulong index, char *data, Torrent *tor, Peer *peer);
 int updatepeerspieces(Torrent *tor, Peer *peer, int index, char op);
-void freepeer(Peer *peer, Peer **listhead);
 
-void calltrackers(Torrent *tor, char *reqtype, int interval);
+void poketrackers(void *arg);
 
 void callees(void *arg);
 void callers(void *arg);
