@@ -376,7 +376,6 @@ connect(void *arg)
 	*(params->fd) = dial(netmkaddr(addr, "tcp", port), 0, 0, 0);
 	chanmsg[0] = 1;
 	send(params->c,chanmsg);
-	threadexits(0); 
 }
 
 
@@ -408,7 +407,7 @@ hello1(Peer *peer, Torrent *tor, Channel *c)
 	free(params->fd);
 	free(params);
 	if(peerfd < 0){
-		fprint(2, "can't dial %s %r\n", peer->peerinfo->address);
+		dbgprint(1, "can't dial %s!%d \n", peer->peerinfo->address, peer->peerinfo->port);
 		return -1;
 	}
 	chanmsg[0] = 1;
@@ -669,7 +668,7 @@ listener(void *arg)
 	threadexits(0);	
 }
 
-//TODO: make it return an int for error handling
+//TODO: remove that unused channel?
 static int
 hello2(Peer *peer, Torrent *tor, Channel *c)
 {

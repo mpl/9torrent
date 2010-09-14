@@ -73,7 +73,7 @@ callee(void *arg)
 	chatpeer(params->tor, params->peer, params->c, 2);
 	freepeer(params->peer, &(params->tor->p_callers));
 	params->tor->p_callersnb--;
-	chanfree(params->c);
+//	chanfree(params->c);
 	free(params);
 	print("callee [%d] terminated\n", threadid());
 }
@@ -179,7 +179,7 @@ caller(void *arg)
 	params->tor->p_calleesnb--;
 	chanmsg[0] = 7;
 	send(params->c, chanmsg);
-	chanfree(params->c);
+//	chanfree(params->c);
 	free(params);
 	print("caller [%d] terminated\n", threadid());
 }
@@ -197,20 +197,24 @@ callers(void *arg)
 	struct Params2{Torrent *tor; char *reqtype; Channel *c;} *params2;
 	struct Params{Torrent *tor; Peer *peer; Channel *c;} *params;
 	static int num = 0;
-	int lastcalled = 0;
+	int counter = 0;
 	int wait = 0;
 
 	// first proc is for the tracker caller
-	a = emalloc(sizeof(Alt));
+	a = emalloc(2 * sizeof(Alt));
 	a[0].v = m;
 	a[0].c = chancreate(sizeof(m), 0);
 	a[0].op = CHANRCV;
-	params2 = emalloc(sizeof(struct Params));
+	a[1].v = nil;
+	a[1].c = nil;
+	a[1].op = CHANEND;
+	counter++;
+	params2 = emalloc(sizeof(struct Params2));
 	params2->tor = tor;
 	params2->reqtype = smprint("announce");
 	params2->c = a[0].c;
 	proccreate(poketrackers, params2, STACK);
-	dbgprint(1, "tracker thread started\n", i);	
+	dbgprint(1, "tracker proc started\n", i);	
 	// wait for the first call to the tracker to finish
 	recv(a[0].c, m);
 	while (m[0] != 1)
@@ -219,7 +223,7 @@ callers(void *arg)
 	// now for the callers
 	for (i = 0; i<tor->peersinfonb; i++){
 		// allow only for a total of maxpeers peers
-		if (tor->p_callersnb + tor->p_calleesnb < maxpeers){
+		if (tor->p_callersnb + tor->p_calleesnb < maxpeers) {
 			// add a new callee peer to the list
 			if (tor->p_calleesnb == 0){
 				tor->p_callees = emalloc(sizeof(Peer));
@@ -244,29 +248,29 @@ callers(void *arg)
 			num += 2;
 
 			// add a new Alt entry 
-			a = erealloc(a, (i+2)*sizeof(Alt));
-			a[i+1].v = m;
-			a[i+1].c = chancreate(sizeof(m), 0);
-			a[i+1].op = CHANRCV;
+			a = erealloc(a, (counter+1)*sizeof(Alt));
+			a[counter].v = m;
+			a[counter].c = chancreate(sizeof(m), 0);
+			a[counter].op = CHANRCV;
 
 			// prepare params for the thread
 			params = emalloc(sizeof(struct Params));
 			params->tor = tor;
 			params->peer = peer;
-			params->c = a[i+1].c;
+			params->c = a[counter].c;
 			threadcreate(caller, params, STACK);
+			counter++;
 			dbgprint(1, "caller thread #%d started\n", i);
 		}
 		else {
-			// keep track what peersinfo we were at, for later
-			lastcalled = i;
 			break;
 		}
 	}
-	a = erealloc(a, (i+1)*sizeof(Alt));
-	a[i].v = nil;
-	a[i].c = nil;
-	a[i].op = CHANEND;
+
+	a = erealloc(a, (counter+1)*sizeof(Alt));
+	a[counter].v = nil;
+	a[counter].c = nil;
+	a[counter].op = CHANEND;
 	for(;;){
 		n = alt(a);
 		if((n<0) || (n>i))
@@ -280,7 +284,9 @@ callers(void *arg)
 				dbgprint(1, "tracker caller is done \n");
 				wait = 0;
 			}
+			continue;
 		}
+
 		if (m[0] == 7){
 			// a caller has terminated.
 			// update our bitfield
@@ -291,9 +297,10 @@ callers(void *arg)
 
 			// if tracker caller is not busy with peersinfo, 
 			// try to contact a new one
+//TODO: rework that when we get around to having a fresh peersinfo
 			if (!wait) {
-				if (tor->p_callersnb + tor->p_calleesnb < maxpeers){
-					i = lastcalled;
+				if (tor->p_callersnb + tor->p_calleesnb < maxpeers
+					&& counter < tor->peersinfonb){
 					// add a new callee peer to the list
 					if (tor->p_calleesnb == 0){
 						tor->p_callees = emalloc(sizeof(Peer));
@@ -306,10 +313,10 @@ callers(void *arg)
 					peer->next = nil;
 					peer->busy = 1;
 					peer->peerinfo = emalloc(sizeof(Peerinfo));
-					peer->peerinfo->address = smprint("%s", tor->peersinfo[i]->address);
-					peer->peerinfo->port = tor->peersinfo[i]->port;
-					if (tor->peersinfo[i]->id != nil)
-						peer->peerinfo->id = smprint("%s", tor->peersinfo[i]->id);
+					peer->peerinfo->address = smprint("%s", tor->peersinfo[counter]->address);
+					peer->peerinfo->port = tor->peersinfo[counter]->port;
+					if (tor->peersinfo[counter]->id != nil)
+						peer->peerinfo->id = smprint("%s", tor->peersinfo[counter]->id);
 					else
 						peer->peerinfo->id = nil;
 					peer->num = num;
@@ -319,10 +326,13 @@ callers(void *arg)
 		
 		//TODO: reuse the "freed" entries instead of creating new ones
 					// add a new Alt entry 
-					a = erealloc(a, (i+1)*sizeof(Alt));
-					a[i].v = m;
-					a[i].c = chancreate(sizeof(m), 0);
-					a[i].op = CHANRCV;
+					a = erealloc(a, (counter+2)*sizeof(Alt));
+					a[counter+1].v = nil;
+					a[counter+1].c = nil;
+					a[counter+1].op = CHANEND;
+					a[counter].v = m;
+					a[counter].c = chancreate(sizeof(m), 0);
+					a[counter].op = CHANRCV;
 		
 					// prepare params for the thread
 					params = emalloc(sizeof(struct Params));
@@ -330,12 +340,13 @@ callers(void *arg)
 					params->peer = peer;
 					params->c = a[i].c;
 					threadcreate(caller, params, STACK);
-					lastcalled++;
 					dbgprint(1, "caller thread #%d started\n", i);
+					counter++;
 				}
 			} else {
 //TODO: see later about that.
 			}
+			continue;
 		}
 	}
 	threadexits(0);	

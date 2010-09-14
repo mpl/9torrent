@@ -71,7 +71,6 @@ getky(char *data, int *offset)
 	
 	length = readnb(data, offset, ':');
 	if ( length <= 0){
-		free(key);
 		return length;
 	}
 	key = emalloc((length+1)*sizeof(char));
@@ -100,6 +99,7 @@ getelem(int keytype, char *data, int *offset, Torrent *tor)
 	switch(keytype){
 	case BTEOF:
 		return 0;
+		break;
 	case BTinterval:
 		if (data[*offset] != 'i'){
 			fprint(2, "Not a valid beencoded integer\n");
@@ -235,7 +235,7 @@ getelem(int keytype, char *data, int *offset, Torrent *tor)
 		print("No match!\n");
 		return -1;
 	}
-	return index;
+	return keytype;
 }
 
 static int
@@ -338,7 +338,6 @@ sending compact=0 will in fact result in compact replies!
 		//buf = strcat(buf,"&ip=127.0.0.1");
 		buf = strcat(buf,"&peer_id=");
 		buf = strcat(buf,peerid);
-		print("%s", buf);
 	}
 
 	*msg = erealloc(*msg, (512)*sizeof(char));
@@ -355,8 +354,9 @@ calltrackers(Torrent *tor, char *reqtype, int interval, Channel *c)
 {
 	int tmpfd;
 	char *reply = emalloc(1);
-	char *msg;
+	char *msg = emalloc(1);
 	char buf[13];
+//TODO: we're probably leaking the old peerinfo
 	Peerinfo **peers = nil;
 	Peerinfo *peer = nil;
 	int i = 0;
@@ -462,6 +462,7 @@ calltrackers(Torrent *tor, char *reqtype, int interval, Channel *c)
 	free(msg);
 	m[0] = 1;
 	send(c, m);
+	sleep(interval);
 }
 
 //TODO: we'll have to call again all the trackers inbefore their interval, so we'll have to set the timeout according to how many we have to call.

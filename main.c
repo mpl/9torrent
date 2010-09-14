@@ -100,6 +100,7 @@ initstuff(Torrent *tor)
 	tor->p_calleesnb = 0;
 	tor->p_callees = nil;
 	tor->p_callers = nil;
+	// default value because we haven't got it from the tracker yet
 	tor->interval = 1800;
 
 	fmtinstall('V', eipfmt);
@@ -209,6 +210,7 @@ threadmain(int argc, char **argv)
 //TODO: we need to detect successfull dl from callees as well
 	if (!onlycall)
 		proccreate(callees, torrents[0], STACK);
+//TODO: even with onlylisten we should call the tracker
 	if (!onlylisten)
 		proccreate(callers, torrents[0], STACK);
 	threadexits(0);
