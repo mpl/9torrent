@@ -1,0 +1,2 @@
+Btfs is an attempt at an implementation of the
+BitTorrent protocol. The primary goal is to design and program a BitTorrent client for the Plan 9 from Bell Labs operating system providing the basic functionalities found in most BitTorrent clients. The general design and user interface are elaborated with the Plan 9 file server model in mind.
